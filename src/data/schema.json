@@ -1,0 +1,95 @@
+{
+  "_comment": "Tuscany Trail Planner — Firebase Firestore Schema",
+
+  "collections": {
+
+    "users": {
+      "_doc": "{userId}",
+      "id": "string (Firebase Auth UID)",
+      "displayName": "string",
+      "avatarUrl": "string | null",
+      "createdAt": "Timestamp",
+      "stats": {
+        "totalTrips": "number",
+        "totalKmRidden": "number"
+      }
+    },
+
+    "trips": {
+      "_doc": "{tripId}",
+      "userId": "string (ref → users/{userId})",
+      "title": "string  e.g. 'Tuscany Trail 2026'",
+      "startDateTime": "Timestamp  — rider's planned departure",
+      "totalDays": "number  — how many riding days",
+      "totalRouteKm": "number  — 445 for Tuscany Trail",
+      "stages": [
+        {
+          "dayNumber": "number  (1-based)",
+          "date": "Timestamp",
+          "startKm": "number",
+          "endKm": "number",
+          "distanceKm": "number",
+          "elevationGainM": "number",
+          "difficultyMultiplier": "number  (1.0 = flat, >1 = harder)",
+          "effectiveKm": "number  (distanceKm × difficultyMultiplier)",
+          "targetTown": "string  — nearest town to end point",
+          "startCoord": { "lat": "number", "lng": "number" },
+          "endCoord":   { "lat": "number", "lng": "number" }
+        }
+      ],
+      "createdAt": "Timestamp",
+      "updatedAt": "Timestamp"
+    },
+
+    "journal_photos": {
+      "_doc": "{photoId}",
+      "userId": "string",
+      "tripId": "string",
+      "imageUrl": "string  — Firebase Storage path",
+      "thumbnailUrl": "string",
+      "caption": "string",
+      "kmMarker": "number  — snapped to nearest GPX point",
+      "coord": { "lat": "number", "lng": "number" },
+      "exif": {
+        "takenAt": "Timestamp",
+        "deviceModel": "string | null",
+        "altitudeM": "number | null"
+      },
+      "dayNumber": "number  — which stage this belongs to",
+      "createdAt": "Timestamp"
+    },
+
+    "notice_board": {
+      "_doc": "{pinId}",
+      "userId": "string",
+      "displayName": "string  — denormalised for fast render",
+      "category": "enum: water | mud | hazard | info | closed | repair",
+      "message": "string  — short user text, max 120 chars",
+      "coord": { "lat": "number", "lng": "number" },
+      "kmMarker": "number",
+      "upvotes": "number",
+      "isActive": "boolean  — set false when resolved/stale",
+      "expiresAt": "Timestamp  — auto-expire after 48 h",
+      "createdAt": "Timestamp",
+      "_indexes": [
+        "isActive ASC + createdAt DESC  (feed query)",
+        "kmMarker ASC + isActive ASC    (map range query)"
+      ]
+    },
+
+    "hotels": {
+      "_doc": "{hotelId}",
+      "_comment": "Seeded once — not user-generated",
+      "name": "string",
+      "town": "string",
+      "coord": { "lat": "number", "lng": "number" },
+      "kmMarker": "number  — nearest trail km",
+      "stars": "number 1-5",
+      "priceRange": "enum: budget | mid | luxury",
+      "phone": "string | null",
+      "bookingUrl": "string | null",
+      "amenities": ["bike_storage", "laundry", "dinner", "packed_lunch"],
+      "distanceFromTrailM": "number"
+    }
+  }
+}
