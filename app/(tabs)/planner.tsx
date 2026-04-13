@@ -15,6 +15,9 @@ import type { Stage } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 import { useItinerary } from '@/hooks/useItinerary';
 import type { SavedItinerary } from '@/hooks/useItinerary';
+import { useHotels, checkInForDay } from '@/hooks/useHotels';
+import { HotelAvailabilitySection } from '@/components/HotelAvailabilitySection';
+import type { HotelAvailability, Coord } from '@/types';
 
 const TOTAL_KM = 454;
 const TOTAL_MI = 282.1;
@@ -35,6 +38,26 @@ const fmtDist = (km: number, u: Units) => u === 'metric' ? `${km} km` : `${kmToM
 const fmtElev = (m: number, u: Units) => u === 'metric' ? `${m} m` : `${mToFt(m)} ft`;
 const distUnit = (u: Units) => u === 'metric' ? 'km' : 'mi';
 const distVal = (km: number, u: Units) => u === 'metric' ? km : kmToMi(km);
+
+/** Format a date string as "Saturday May 20" */
+const fmtDate = (dateStr: string) => {
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+};
+
+/** Format a date for day N of the ride: startDate + (dayNumber) days */
+const fmtDayDate = (startDate: string, dayNumber: number) => {
+  const d = new Date(startDate + 'T00:00:00');
+  d.setDate(d.getDate() + (dayNumber - 1));
+  return fmtDate(d.toISOString().slice(0, 10));
+};
+
+/** Finish date: startDate + totalDays */
+const fmtFinishDate = (startDate: string, totalDays: number) => {
+  const d = new Date(startDate + 'T00:00:00');
+  d.setDate(d.getDate() + totalDays);
+  return fmtDate(d.toISOString().slice(0, 10));
+};
 
 const KM_PER_DAY: Record<number, Record<Units, string>> = {
   3: { metric: '~151', imperial: '~94' },
@@ -61,6 +84,16 @@ export default function PlannerScreen() {
   const [splitPct, setSplitPct] = useState(50); // left pane width %
   const [activeDay, setActiveDay] = useState<number>(1); // 1-indexed day number
   const [hoverKm, setHoverKm] = useState<number | null>(null);
+
+  // Hotel availability
+  const [dayRadii, setDayRadii] = useState<Record<number, number>>({});
+  const [expandedHotelDays, setExpandedHotelDays] = useState<Set<number>>(new Set());
+  const [selectedHotel, setSelectedHotel] = useState<{
+    hotelCode: string;
+    name: string;
+    coord: Coord;
+    townCoord: Coord;
+  } | null>(null);
 
   // Saved itinerary ID currently loaded (null = unsaved / new)
   const [loadedItinId, setLoadedItinId] = useState<string | null>(null);
@@ -185,16 +218,31 @@ export default function PlannerScreen() {
     }));
   }, [totalDays, townOverrides]);
 
+  // Hotel availability — depends on dayPlan so must come after it
+  const hotelResults = useHotels(dayPlan, startDate, dayRadii);
+
   function handleMarkerDrag(dayNumber: number, coord: [number, number]) {
     const [lng, lat] = coord;
-    // Find nearest trail town with accommodation
-    const nearest = TRAIL_TOWNS
-      .filter((t) => t.hasAccommodation && t.kmMarker > 0 && t.kmMarker < TOTAL_KM)
-      .reduce((best, town) => {
-        const d = Math.sqrt((town.coord.lat - lat) ** 2 + (town.coord.lng - lng) ** 2);
-        const bd = Math.sqrt((best.coord.lat - lat) ** 2 + (best.coord.lng - lng) ** 2);
-        return d < bd ? town : best;
-      });
+
+    // Find km bounds: the dragged stop must stay between its neighbouring stops
+    const dayIdx = dayNumber - 1;
+    const prevKm = dayPlan[dayIdx]?.from.kmMarker ?? 0;
+    const nextKm = dayIdx + 1 < dayPlan.length
+      ? dayPlan[dayIdx + 1]?.to.kmMarker ?? TOTAL_KM
+      : TOTAL_KM;
+
+    // Find nearest trail town with accommodation within the valid km range
+    const candidates = TRAIL_TOWNS
+      .filter((t) => t.hasAccommodation && t.kmMarker > prevKm && t.kmMarker < nextKm);
+
+    if (candidates.length === 0) return;
+
+    const nearest = candidates.reduce((best, town) => {
+      const d = Math.sqrt((town.coord.lat - lat) ** 2 + (town.coord.lng - lng) ** 2);
+      const bd = Math.sqrt((best.coord.lat - lat) ** 2 + (best.coord.lng - lng) ** 2);
+      return d < bd ? town : best;
+    });
+
     setTownOverrides((prev) => ({ ...prev, [dayNumber]: nearest }));
   }
 
@@ -416,6 +464,11 @@ export default function PlannerScreen() {
                 color: DAY_COLORS[i] ?? '#39FF14',
               }))}
               hoverKm={hoverKm}
+              hotelRoute={selectedHotel ? {
+                from: selectedHotel.townCoord,
+                to: selectedHotel.coord,
+                name: selectedHotel.name,
+              } : null}
               activeSegment={activeDay != null ? {
                 startKm: dayPlan[activeDay - 1]?.from.kmMarker ?? 0,
                 endKm: dayPlan[activeDay - 1]?.to.kmMarker ?? 0,
@@ -512,7 +565,7 @@ export default function PlannerScreen() {
                   <View style={styles.stopCardContent}>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.stopName}>Campiglia Marittima</Text>
-                      <Text style={styles.stopMeta}>Start · {startDate} · {startTime}</Text>
+                      <Text style={styles.stopMeta}>Start · {fmtDate(startDate)} · {startTime}</Text>
                     </View>
                     <View style={styles.kmPill}>
                       <Text style={styles.kmPillTxt}>0</Text>
@@ -573,7 +626,7 @@ export default function PlannerScreen() {
                             </View>
                           )}
                           <Text style={styles.stopMeta}>
-                            {fmtDist(day.distanceKm, units)} from {day.from.name} · {day.to.region}
+                            {fmtDayDate(startDate, day.dayNumber)} · {fmtDist(day.distanceKm, units)} from {day.from.name}
                           </Text>
                           {isOverridden && suggested
                             ? <Text style={styles.stopNote}>Suggested: {suggested.name}</Text>
@@ -589,6 +642,31 @@ export default function PlannerScreen() {
                           <Text style={styles.kmPillUnit}>{distUnit(units)}</Text>
                         </View>
                       </View>
+
+                      {/* Hotel availability */}
+                      <HotelAvailabilitySection
+                        result={hotelResults[day.dayNumber] ?? { status: 'idle', hotels: [] }}
+                        checkIn={checkInForDay(startDate, day.dayNumber)}
+                        color={color}
+                        expanded={expandedHotelDays.has(day.dayNumber)}
+                        onToggle={() => setExpandedHotelDays((prev) => {
+                          const next = new Set(prev);
+                          next.has(day.dayNumber) ? next.delete(day.dayNumber) : next.add(day.dayNumber);
+                          return next;
+                        })}
+                        radiusKm={dayRadii[day.dayNumber] ?? 5}
+                        onRadiusChange={(r: number) => setDayRadii((prev) => ({ ...prev, [day.dayNumber]: r }))}
+                        selectedHotelCode={selectedHotel?.hotelCode ?? null}
+                        onSelectHotel={(hotel: HotelAvailability | null) => {
+                          if (!hotel) { setSelectedHotel(null); return; }
+                          setSelectedHotel({
+                            hotelCode: hotel.hotelCode,
+                            name: hotel.name,
+                            coord: hotel.coord,
+                            townCoord: day.to.coord,
+                          });
+                        }}
+                      />
                     </View>
                   </View>
                 );
@@ -605,7 +683,7 @@ export default function PlannerScreen() {
                   <View style={styles.stopCardContent}>
                     <View>
                       <Text style={styles.stopName}>Campiglia Marittima</Text>
-                      <Text style={styles.stopMeta}>Finish · {units === 'metric' ? '454 km' : '282.1 mi'}</Text>
+                      <Text style={styles.stopMeta}>Finish · {fmtFinishDate(startDate, totalDays)} · {units === 'metric' ? '454 km' : '282.1 mi'}</Text>
                     </View>
                     <View style={styles.kmPill}>
                       <Text style={styles.kmPillTxt}>{units === 'metric' ? 454 : 282}</Text>

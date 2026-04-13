@@ -65,6 +65,14 @@ function pointAtKm(km: number): { lat: number; lng: number; bearing: number } | 
 
 type DaySegment = { startKm: number; endKm: number; color: string };
 
+const HOTEL_ROUTE_COLOR = '#E040FB'; // magenta — distinct from day colors
+
+interface HotelRouteInfo {
+  from: { lat: number; lng: number };
+  to: { lat: number; lng: number };
+  name: string;
+}
+
 export function MapView({
   style,
   children,
@@ -72,6 +80,7 @@ export function MapView({
   activeSegment,
   daySegments,
   hoverKm,
+  hotelRoute,
 }: {
   style?: any;
   children?: React.ReactNode;
@@ -79,6 +88,7 @@ export function MapView({
   activeSegment?: DaySegment;
   daySegments?: DaySegment[];
   hoverKm?: number | null;
+  hotelRoute?: HotelRouteInfo | null;
   logoEnabled?: boolean;
   attributionEnabled?: boolean;
 }) {
@@ -160,10 +170,26 @@ export function MapView({
       segmentLayersRef.current.push(line);
     } else {
       // Draw each day segment in its color
+      // Include one point beyond each boundary so segments connect seamlessly
       for (const seg of segs) {
-        const pts = ROUTE
-          .filter(([, , km]) => km >= seg.startKm && km <= seg.endKm)
-          .map(([lat, lng]) => [lat, lng] as [number, number]);
+        const pts: [number, number][] = [];
+        let addedBefore = false;
+        for (let j = 0; j < ROUTE.length; j++) {
+          const [lat, lng, km] = ROUTE[j];
+          if (km >= seg.startKm && km <= seg.endKm) {
+            // Include the point just before the segment start for smooth join
+            if (!addedBefore && j > 0 && seg.startKm > 0) {
+              const [pLat, pLng] = ROUTE[j - 1];
+              pts.push([pLat, pLng]);
+            }
+            addedBefore = true;
+            pts.push([lat, lng]);
+          } else if (km > seg.endKm) {
+            // Include first point past the end for smooth join to next segment
+            pts.push([lat, lng]);
+            break;
+          }
+        }
         if (pts.length < 2) continue;
         const line = L.polyline(pts, {
           color: seg.color, weight: 3, opacity: 0.85, dashArray: '6 4',
@@ -226,9 +252,20 @@ export function MapView({
 
     if (!activeSegment) return;
 
-    const segPoints = ROUTE
-      .filter(([, , km]) => km >= activeSegment.startKm && km <= activeSegment.endKm)
-      .map(([lat, lng]) => [lat, lng] as [number, number]);
+    const segPoints: [number, number][] = [];
+    for (let j = 0; j < ROUTE.length; j++) {
+      const [lat, lng, km] = ROUTE[j];
+      if (km >= activeSegment.startKm && km <= activeSegment.endKm) {
+        if (segPoints.length === 0 && j > 0 && activeSegment.startKm > 0) {
+          const [pLat, pLng] = ROUTE[j - 1];
+          segPoints.push([pLat, pLng]);
+        }
+        segPoints.push([lat, lng]);
+      } else if (km > activeSegment.endKm) {
+        segPoints.push([lat, lng]);
+        break;
+      }
+    }
 
     if (segPoints.length < 2) return;
 
@@ -254,9 +291,20 @@ export function MapView({
     const hoveredSeg = daySegments.find(s => hoverKm >= s.startKm && hoverKm <= s.endKm);
     if (!hoveredSeg) return;
 
-    const pts = ROUTE
-      .filter(([, , km]) => km >= hoveredSeg.startKm && km <= hoveredSeg.endKm)
-      .map(([lat, lng]) => [lat, lng] as [number, number]);
+    const pts: [number, number][] = [];
+    for (let j = 0; j < ROUTE.length; j++) {
+      const [lat, lng, km] = ROUTE[j];
+      if (km >= hoveredSeg.startKm && km <= hoveredSeg.endKm) {
+        if (pts.length === 0 && j > 0 && hoveredSeg.startKm > 0) {
+          const [pLat, pLng] = ROUTE[j - 1];
+          pts.push([pLat, pLng]);
+        }
+        pts.push([lat, lng]);
+      } else if (km > hoveredSeg.endKm) {
+        pts.push([lat, lng]);
+        break;
+      }
+    }
     if (pts.length < 2) return;
 
     hoverHighlightRef.current = L.polyline(pts, {
@@ -296,6 +344,83 @@ export function MapView({
     const icon = L.divIcon({ html, className: '', iconSize: [14, 14], iconAnchor: [7, 7] });
     hoverMarkerRef.current = L.marker([pt.lat, pt.lng], { icon, interactive: false, zIndexOffset: 1000 }).addTo(map);
   }, [ctx, hoverKm, daySegments]);
+
+  // Hotel route — fetch cycling directions from OSRM and draw detour on map
+  const hotelRouteLayersRef = useRef<any[]>([]);
+  useEffect(() => {
+    if (!ctx) return;
+    const { L, map } = ctx;
+
+    // Clear previous hotel route layers
+    hotelRouteLayersRef.current.forEach((layer) => map.removeLayer(layer));
+    hotelRouteLayersRef.current = [];
+
+    if (!hotelRoute) return;
+
+    let cancelled = false;
+    const { from, to, name } = hotelRoute;
+    const color = HOTEL_ROUTE_COLOR;
+
+    /** Add the route line + markers for a given distance (in meters) */
+    const drawRoute = (latLngs: [number, number][], distanceM: number | null) => {
+      // Dashed line from town → hotel
+      const line = L.polyline(latLngs, {
+        color, weight: 4, opacity: 0.9, dashArray: '8 6',
+      }).addTo(map);
+      hotelRouteLayersRef.current.push(line);
+
+      // Round-trip distance label
+      const distLabel = distanceM != null
+        ? `${(distanceM * 2 / 1000).toFixed(1)} km round trip`
+        : '';
+
+      // Hotel marker pin
+      const pinHtml =
+        `<div style="background:${color};color:#FFF;font-size:11px;font-weight:800;` +
+        `padding:3px 8px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.5);white-space:nowrap">` +
+        `🏨 ${name.length > 22 ? name.slice(0, 20) + '…' : name}</div>`;
+      const pinIcon = L.divIcon({ html: pinHtml, className: '', iconAnchor: [0, 0] });
+      const pin = L.marker([to.lat, to.lng], { icon: pinIcon, interactive: false, zIndexOffset: 900 }).addTo(map);
+      hotelRouteLayersRef.current.push(pin);
+
+      // Distance badge at midpoint of the line
+      if (distLabel) {
+        const mid = latLngs[Math.floor(latLngs.length / 2)];
+        const badgeHtml =
+          `<div style="background:rgba(13,27,15,0.9);color:${color};font-size:10px;font-weight:700;` +
+          `padding:2px 6px;border-radius:4px;border:1px solid ${color};white-space:nowrap">` +
+          `↔ ${distLabel}</div>`;
+        const badgeIcon = L.divIcon({ html: badgeHtml, className: '', iconAnchor: [0, 0] });
+        const badge = L.marker(mid, { icon: badgeIcon, interactive: false, zIndexOffset: 950 }).addTo(map);
+        hotelRouteLayersRef.current.push(badge);
+      }
+    };
+
+    // Fetch route from OSRM (free, no API key) — use bike profile
+    const url = `https://router.project-osrm.org/route/v1/bike/${from.lng},${from.lat};${to.lng},${to.lat}?geometries=geojson&overview=full`;
+
+    fetch(url)
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        const route = data?.routes?.[0];
+        const coords: [number, number][] = route?.geometry?.coordinates ?? [];
+        const distanceM: number | null = route?.distance ?? null;
+
+        if (coords.length < 2) {
+          drawRoute([[from.lat, from.lng], [to.lat, to.lng]], distanceM);
+        } else {
+          const latLngs = coords.map(([lng, lat]: [number, number]) => [lat, lng] as [number, number]);
+          drawRoute(latLngs, distanceM);
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        drawRoute([[from.lat, from.lng], [to.lat, to.lng]], null);
+      });
+
+    return () => { cancelled = true; };
+  }, [ctx, hotelRoute?.from?.lat, hotelRoute?.from?.lng, hotelRoute?.to?.lat, hotelRoute?.to?.lng, hotelRoute?.name]);
 
   if (!isEmbedded) {
     return (

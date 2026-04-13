@@ -95,3 +95,37 @@ export interface Hotel {
   amenities: string[];
   distanceFromTrailM: number;
 }
+
+// ─── Hotel Search ────────────────────────────────────────────────────────────
+
+export interface HotelSearchParams {
+  lat: number;
+  lng: number;
+  checkIn: string;      // YYYY-MM-DD
+  checkOut: string;     // YYYY-MM-DD
+  radiusKm?: number;    // default 5
+  maxResults?: number;  // default 5
+  locationName?: string; // town/city name for text-based search providers
+}
+
+// ─── Hotel Availability ──────────────────────────────────────────────────────
+
+export interface HotelAvailability {
+  hotelCode: string;
+  name: string;
+  stars: number;
+  minRate: number;
+  currency: string;
+  bookingUrl: string;
+  checkIn: string;
+  checkOut: string;
+  coord: Coord;           // Hotel location from HotelBeds API
+}
+
+export type HotelFetchStatus = 'idle' | 'loading' | 'success' | 'error';
+
+export interface HotelDayResult {
+  status: HotelFetchStatus;
+  hotels: HotelAvailability[];
+  error?: string;
+}
