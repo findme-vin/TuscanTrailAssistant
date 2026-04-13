@@ -1,0 +1,56 @@
+{
+  "expo": {
+    "name": "Tuscany Trail Planner",
+    "slug": "tuscany-trail-planner",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "tuscanytrail",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/images/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0D1B0F"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.tuscanytrail.planner",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Used to show your position on the trail.",
+        "NSCameraUsageDescription": "Used to capture trail photos for your journal.",
+        "NSPhotoLibraryUsageDescription": "Used to save trail photos to your journal."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#0D1B0F"
+      },
+      "package": "com.tuscanytrail.planner",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "server",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-camera",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Tuscany Trail Planner uses location to track your position on the route."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

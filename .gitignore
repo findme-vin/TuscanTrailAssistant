@@ -1,0 +1,21 @@
+# Expo
+expo-env.d.ts
+.expo/
+
+# Dependencies
+node_modules/
+
+# Environment variables (contains secrets)
+.env
+.env.local
+
+# Build output
+dist/
+web-build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+{let
